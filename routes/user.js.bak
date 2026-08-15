@@ -1,0 +1,51 @@
+// routes/user.js
+const express = require('express');
+const router = express.Router();
+const upload = require('../utils/multer');
+const cloudinary = require('../utils/cloudinary');
+const userController = require('../controllers/userController');
+const User = require('./models/User');
+
+// Note: I removed 'authMiddleware' from here
+router.post('/change-password', (req, res, next) => {
+  console.log('ROUTE HIT: /api/user/change-password'); // This will print in your terminal
+  next();
+}, userController.changePassword);
+
+router.post('/upload-avatar', upload.single('image'), async (req, res) => {
+  try {
+    // 1. Check if file was uploaded
+    if (!req.file) {
+      return res.status(400).json({ error: 'No file uploaded' });
+    }
+
+    // 2. Get the new URL from Cloudinary
+    // Cloudinary/Multer automatically puts the URL in `req.file.path`
+    const imageUrl = req.file.path; 
+    
+    // 3. Assume you are sending the User ID in the body
+    const userId = req.body.userId;
+
+    // 4. Update MongoDB
+    const updatedUser = await User.findByIdAndUpdate(
+      userId,
+      { profile_pic: imageUrl }, // Save the URL string
+      { new: true } // Return the updated document
+    );
+
+    res.json({
+      success: true,
+      message: "Profile picture updated!",
+      data: {
+        username: updatedUser.username,
+        profile_pic: updatedUser.profile_pic
+      }
+    });
+
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Upload failed' });
+  }
+});
+
+module.exports = router;
