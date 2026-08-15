@@ -6,6 +6,8 @@ const slotSchema = new mongoose.Schema({
   courseCode: { type: String, default: '' },      // e.g. "MAT101" - Displayed in the grid
   courseName: { type: String, default: '' },      // e.g. "Mathematics" - For details
   facultyName: { type: String, default: '' },     // e.g. "Dr. Smith" - For pop-up details
+  facultyImage: { type: String, default: '' }, // <--- Added
+  facultyDept: { type: String, default: '' },
   color: { type: String, default: '#FFFFFFFF' },  // Course color
   
   // Slot Specifics

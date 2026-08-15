@@ -1,11 +1,8 @@
 // deleteUser.js
-// Usage examples:
-// node deleteUser.js '{"email":"sai@example.com"}'
-// node deleteUser.js '{"id":"690cf5bd5cfbff1886f6733f"}'
-
 require('dotenv').config();
 const mongoose = require('mongoose');
 const readline = require('readline');
+const cloudinary = require('./utils/cloudinary'); // Import Cloudinary utils
 const User = require('./models/User');
 
 async function confirmPrompt(question) {
@@ -29,13 +26,24 @@ async function deleteUser(filter, force = false) {
       console.log('No user found for filter:', query);
       return;
     }
-    console.log('Found user:', { id: user._id.toString(), email: user.email, name: user.name });
+    console.log('Found user:', { id: user._id.toString(), email: user.email, name: user.name, role: user.role });
 
     if (!force) {
       const ok = await confirmPrompt('Are you sure you want to PERMANENTLY delete this user? Type yes to confirm: ');
       if (!ok) {
         console.log('Aborted by user.');
         return;
+      }
+    }
+
+    // NEW: Cleanup Cloudinary Image
+    if (user.profile && user.profile.public_id) {
+      console.log(`Deleting Cloudinary image: ${user.profile.public_id}`);
+      try {
+        await cloudinary.uploader.destroy(user.profile.public_id);
+        console.log('Image deleted.');
+      } catch (e) {
+        console.error('Failed to delete image from Cloudinary:', e.message);
       }
     }
 
@@ -57,7 +65,7 @@ async function main() {
     const filter = {};
     if (obj.email) filter.email = obj.email;
     if (obj.id) filter.id = obj.id;
-    const force = !!obj.force; // if you pass {"email":"...","force":true} it will skip prompt
+    const force = !!obj.force; 
     await deleteUser(filter, force);
     process.exit(0);
   } catch (err) {

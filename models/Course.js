@@ -17,6 +17,6 @@ const courseSchema = new mongoose.Schema({
     createdAt: { type: Date, default: Date.now }
 });
 
-courseSchema.index({ courseCode: 1, branch: 1, semester: 1, section: 1 }, { unique: true });
+//courseSchema.index({ courseCode: 1, branch: 1, semester: 1, section: 1 }, { unique: true });
 
 module.exports = mongoose.model('Course', courseSchema);

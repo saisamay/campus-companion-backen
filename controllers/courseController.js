@@ -4,7 +4,6 @@ const Course = require('../models/Course');
 // @route   POST /api/courses
 const addCourse = async (req, res) => {
     try {
-        // Added 'section' and 'facultyName' to the destructured variables
         const { courseName, courseCode, branch, semester, section, facultyName, color } = req.body;
 
         // Basic validation
@@ -13,24 +12,17 @@ const addCourse = async (req, res) => {
         }
 
         // Check if course code already exists FOR THIS SPECIFIC SECTION
-        const existingCourse = await Course.findOne({ 
-            courseCode, 
-            branch, 
-            semester, 
-            section 
-        });
+        
 
-        if (existingCourse) {
-            return res.status(400).json({ message: `Course ${courseCode} already exists for ${branch} Sem-${semester} Sec-${section}` });
-        }
+        
 
         const newCourse = new Course({
             courseName,
             courseCode,
             branch,
             semester,
-            section,      // <--- Saved
-            facultyName,  // <--- Saved
+            section,      
+            facultyName,  
             color
         });
 
@@ -43,7 +35,7 @@ const addCourse = async (req, res) => {
 };
 
 // @desc    Get courses by Branch, Semester AND Section
-// @route   GET /api/courses?branch=CSE&semester=5&section=A
+// @route   GET /api/courses
 const getCourses = async (req, res) => {
     try {
         const { branch, semester, section } = req.query;
@@ -51,7 +43,7 @@ const getCourses = async (req, res) => {
         let query = {};
         if (branch) query.branch = branch;
         if (semester) query.semester = semester;
-        if (section) query.section = section; // <--- Filter by section
+        if (section) query.section = section; 
 
         const courses = await Course.find(query).sort({ courseName: 1 });
         res.json(courses);
@@ -61,7 +53,25 @@ const getCourses = async (req, res) => {
     }
 };
 
+// @desc    Delete a course
+// @route   DELETE /api/courses/:id
+const deleteCourse = async (req, res) => {
+    try {
+        // 👇 2. USE req.params.id (NOT just 'id')
+        const course = await Course.findByIdAndDelete(req.params.id); 
+        
+        if (!course) {
+            return res.status(404).json({ message: "Course not found" });
+        }
+        res.status(200).json({ message: "Course deleted successfully" });
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+};
+
+// Export all functions together
 module.exports = {
     addCourse,
-    getCourses
+    getCourses,
+    deleteCourse
 };

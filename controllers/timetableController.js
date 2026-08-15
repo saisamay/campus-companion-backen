@@ -1,5 +1,6 @@
 const Timetable = require('../models/Timetable');
-
+const User = require('../models/User');
+const { sendNotification } = require('../utils/notificationService');
 // --- HELPER (from Step 2) ---
 function normalizeGrid(grid) {
   const days = ['Mon','Tue','Wed','Thu','Fri'];
@@ -159,9 +160,13 @@ const getTeacherTimetable = async (req, res) => {
 
 // @desc    Update a specific slot (Cancel Class / Room Change)
 // @route   PUT /api/timetable/slot
-// @access  ClassRep (own section) or Teacher (own classes)
+// @access  ClassRep (own section) or Teacher (own classes) or Admin
 const updateSlot = async (req, res) => {
     try {
+        // Accept either role in body or use authenticated user
+        // Prefer req.user.role (safer). Fallback to provided userRole if present.
+        const requesterRole = (req.user && req.user.role) || req.body.userRole || 'student';
+
         const { semester, branch, section, dayName, slotIndex, isCancelled, newRoom } = req.body;
 
         // 1. Validate Inputs
@@ -170,7 +175,7 @@ const updateSlot = async (req, res) => {
         }
 
         // 2. Authorization Check
-        if (req.user.role === 'classrep') {
+        if (requesterRole === 'classrep') {
             // ClassRep can only edit THEIR OWN section
             if (
                 String(req.user.semester) !== String(semester) || 
@@ -191,23 +196,97 @@ const updateSlot = async (req, res) => {
         if (!dayObj) return res.status(404).json({ message: "Invalid day" });
 
         // 5. Find Slot
-        if (!dayObj.slots[slotIndex]) {
+        const slot = dayObj.slots[slotIndex];
+        if (!slot) {
             return res.status(404).json({ message: "Invalid slot index" });
         }
 
-        // 6. Update Fields
-        // Only update if provided (allows sending just {isCancelled: true})
-        if (isCancelled !== undefined) dayObj.slots[slotIndex].isCancelled = isCancelled;
-        if (newRoom !== undefined) dayObj.slots[slotIndex].newRoom = newRoom;
+        // 6. LOGIC CHECKS (merged from both snippets)
+        // Determine if the requester is admin
+        const isAdmin = requesterRole === 'admin' || requesterRole === 'superadmin';
+
+        let notificationTitle = "";
+        let notificationBody = "";
+
+        // Handle Cancellation
+        if (isCancelled !== undefined) {
+            slot.isCancelled = isCancelled;
+            if (isCancelled) {
+                notificationTitle = "Class Cancelled";
+                notificationBody = `The ${slot.courseName || slot.courseCode || 'class'} class for ${branch}-${section} has been cancelled.`;
+            } else {
+                notificationTitle = "Class Resumed";
+                notificationBody = `The ${slot.courseName || slot.courseCode || 'class'} class has been resumed.`;
+            }
+        }
+
+        // Handle Room Change
+        if (newRoom !== undefined) {
+            // Validation: If not admin, they can only change room when:
+            //  - slot.room is empty (admin didn't set a permanent room)
+            //  - OR they are providing newRoom (which is an override field) — we allow setting slot.newRoom
+            if (!isAdmin) {
+                const currentPermanentRoom = slot.room; // original admin-set room
+                if (currentPermanentRoom && currentPermanentRoom !== '') {
+                    // If admin already set permanent room, block overwriting it directly (but allow setting newRoom)
+                    // We'll set slot.newRoom (override) — but do not overwrite slot.room
+                    slot.newRoom = newRoom;
+                    notificationTitle = "Room Change (Override)";
+                    notificationBody = `Room override for ${slot.courseName || slot.courseCode || 'class'} set to ${newRoom}.`;
+                } else {
+                    // No permanent room, user can set room/newRoom
+                    slot.newRoom = newRoom;
+                    notificationTitle = "Room Changed";
+                    notificationBody = `Room for ${slot.courseName || slot.courseCode || 'class'} updated to ${newRoom}.`;
+                }
+            } else {
+                // Admins can set permanent room directly
+                slot.room = newRoom;
+                // Clear any previous override optionally (keep as-is if you prefer)
+                slot.newRoom = null;
+                notificationTitle = "Room Changed (Admin)";
+                notificationBody = `Room for ${slot.courseName || slot.courseCode || 'class'} updated to ${newRoom} by admin.`;
+            }
+        }
 
         // 7. Save
         await timetable.save();
 
-        // 8. Return updated slot (or full timetable if you prefer)
-        res.json({ 
-            success: true, 
-            message: "Slot updated successfully", 
-            updatedSlot: dayObj.slots[slotIndex] 
+        // 8. SEND NOTIFICATION (if any change produced a notification)
+        if (notificationTitle) {
+            try {
+                // Find recipients: all students in that branch/sem/section
+                const recipients = await User.find({ branch, semester, section, role: 'student' }).select('fcmToken email name');
+                // If you use FCM tokens in sendNotification, pass them
+                if (recipients && recipients.length > 0) {
+                    // Prepare a simple payload; adjust shape as your notification util expects
+                    const tokens = recipients.map(r => r.fcmToken).filter(Boolean);
+                    // If sendNotification expects recipients array, pass recipients directly
+                    if (typeof sendNotification === 'function') {
+                        // prefer tokens if your util uses tokens
+                        if (tokens.length > 0) {
+                            await sendNotification(tokens, notificationTitle, notificationBody);
+                        } else {
+                            // fallback: pass recipient objects
+                            await sendNotification(recipients, notificationTitle, notificationBody);
+                        }
+                    } else {
+                        console.log("sendNotification is not a function — notification skipped.");
+                    }
+                } else {
+                    console.log(`No student recipients found for ${branch}-${semester}-${section}`);
+                }
+            } catch (notifyErr) {
+                console.error("Notification sending failed:", notifyErr);
+                // continue — don't fail the whole request because notification failed
+            }
+        }
+
+        // 9. Return updated slot (or full timetable if you prefer)
+        res.json({
+            success: true,
+            message: "Slot updated successfully",
+            updatedSlot: slot
         });
 
     } catch (error) {
